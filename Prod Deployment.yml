@@ -91,46 +91,46 @@ stages:
           publishLocation: 'Container'
           
 
-      # - task: PowerShell@2
-      #   displayName: Deploy Script in PROD
-      #   inputs:
-      #     targetType: 'inline'
-      #     script: |
-      #       $File_Count = ( Get-ChildItem $(Build.ArtifactStagingDirectory) | Measure-Object ).Count
-      #       echo $File_Count
-      #       if($File_Count -ge 1)
-      #       {
-      #       cd "$(Build.ArtifactStagingDirectory)"
-      #       $contents = Get-ChildItem -Name
-      #       $type= $contents.GetType()
+      - task: PowerShell@2
+        displayName: Deploy Script in PROD
+        inputs:
+          targetType: 'inline'
+          script: |
+            $File_Count = ( Get-ChildItem $(Build.ArtifactStagingDirectory) | Measure-Object ).Count
+            echo $File_Count
+            if($File_Count -ge 1)
+            {
+            cd "$(Build.ArtifactStagingDirectory)"
+            $contents = Get-ChildItem -Name
+            $type= $contents.GetType()
             
-      #       if($type.Name -eq "String"){
-      #         $content = ,$contents
-      #       }
-      #       else{$content = $contents }
+            if($type.Name -eq "String"){
+              $content = ,$contents
+            }
+            else{$content = $contents }
             
-      #       $len=$content.length
+            $len=$content.length
             
-      #       Import-Module SQLServer
-      #       for($i=0; $i -le $len-1; $i++){
-      #       $report_SQL_File_Name = $content[$i]
-      #       $Non_Final_Path = "$(Build.ArtifactStagingDirectory)"
-      #       $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"
+            Import-Module SQLServer
+            for($i=0; $i -le $len-1; $i++){
+            $report_SQL_File_Name = $content[$i]
+            $Non_Final_Path = "$(Build.ArtifactStagingDirectory)"
+            $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"
             
-      #       $clientid = "$(CLIENT_ID)"
-      #       $tenantid = "$(TENANT_ID)"
-      #       $secret = "$(CLIENT_SECRET)"
+            $clientid = "$(CLIENT_ID)"
+            $tenantid = "$(TENANT_ID)"
+            $secret = "$(CLIENT_SECRET)"
             
-      #       $request = Invoke-RestMethod -Method POST `
-      #                 -Uri "https://login.microsoftonline.com/$tenantid/oauth2/token"`
-      #                 -Body @{ resource="https://database.windows.net/"; grant_type="client_credentials"; client_id=$clientid; client_secret=$secret }`
-      #                 -ContentType "application/x-www-form-urlencoded"
-      #       $access_token = $request.access_token
-      #       echo "$report_SQL_File_Name"
-      #       Invoke-Sqlcmd -ServerInstance $(PROD_Server_Name) -Database $(PROD_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"
+            $request = Invoke-RestMethod -Method POST `
+                      -Uri "https://login.microsoftonline.com/$tenantid/oauth2/token"`
+                      -Body @{ resource="https://database.windows.net/"; grant_type="client_credentials"; client_id=$clientid; client_secret=$secret }`
+                      -ContentType "application/x-www-form-urlencoded"
+            $access_token = $request.access_token
+            echo "$report_SQL_File_Name"
+            Invoke-Sqlcmd -ServerInstance $(PROD_Server_Name) -Database $(PROD_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"
 
-      #       }
-      #       }
+            }
+            }
 
 
       - task: PowerShell@2
