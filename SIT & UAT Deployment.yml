@@ -1,0 +1,306 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+pool:
+  name: AzureBI-Agent
+  demands:
+  - Agent.Name -equals AZURE-DEVOPS-08
+ 
+
+parameters:
+- name: Project_Name
+  displayName: Project Name
+  type: string
+  values:
+  - BI
+  - CX
+  - WAM
+  - Self_Service
+  - TRC
+
+variables:
+- group: SQL Credentials
+- group: Database Name
+- group: Server Name
+
+
+stages: 
+- stage: SITDeployment
+  jobs:
+  - deployment: publish
+    pool:
+     name: AzureBI-Agent
+     demands:
+     - Agent.Name -equals AZURE-DEVOPS-08
+    displayName: Deploy Script to SIT
+    environment: SIT
+  - job: My_Job1
+    pool:
+     name: AzureBI-Agent
+     demands:
+     - Agent.Name -equals AZURE-DEVOPS-08
+    steps:
+
+
+    
+      - task: PythonScript@0
+        displayName: Get the Scripts that needs to be deployed
+        inputs:
+          scriptSource: 'inline'
+          script: |
+            import csv
+            import sys
+            from pandas import *
+            import os
+            import shutil
+              
+            
+            path = "C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1]
+            print(path)
+            dir_list = os.listdir(path)
+            
+            data = read_csv("C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv")
+            SIT_Script = data[sys.argv[1]].tolist()
+            print(SIT_Script)
+            SIT_Script.sort()
+            
+            for scripts in dir_list:
+              a=0
+              for values in SIT_Script:
+                if(scripts == values):
+                  a=1
+            
+              if(a == 0):
+                if scripts.endswith('.sql'):
+                  shutil.copy("C:\\Agent\\_work\\6\\s\\Projects\\"+ sys.argv[1] + "\\" + scripts, "C:\\Agent\\_work\\6\\a\\"+scripts)
+                  SIT_Script.append(scripts)
+            
+            print(SIT_Script)
+            Details = [sys.argv[1]]
+            r = zip(SIT_Script)
+            with open("C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv", "w", newline='' ) as s:
+                w = csv.writer(s)
+                w.writerow(Details)
+                for row in r:
+                    w.writerow(row)
+            
+          arguments: '${{ parameters.Project_Name }}'
+
+
+
+      - task: PowerShell@2
+        displayName: Deploy Script in SIT
+        inputs:
+          targetType: 'inline'
+          script: |
+            $File_Count = ( Get-ChildItem $(Build.ArtifactStagingDirectory) | Measure-Object ).Count
+            echo $File_Count
+            if($File_Count -ge 1)
+            {
+            cd "$(Build.ArtifactStagingDirectory)"
+            Get-ChildItem -Name
+            $contents = Get-ChildItem -Name
+            $type= $contents.GetType()
+            
+            if($type.Name -eq "String"){
+              $content = ,$contents
+            }
+            else{$content = $contents }
+            
+            $len=$content.length
+            
+            Import-Module SQLServer
+            for($i=0; $i -le $len-1; $i++)
+            {
+            
+            $report_SQL_File_Name = $content[$i]
+            $Non_Final_Path = "$(Build.ArtifactStagingDirectory)"
+            $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"
+            
+            $clientid = "$(CLIENT_ID)"
+            $tenantid = "$(TENANT_ID)"
+            $secret = "$(CLIENT_SECRET)"
+            
+            $request = Invoke-RestMethod -Method POST `
+                      -Uri "https://login.microsoftonline.com/$tenantid/oauth2/token"`
+                      -Body @{ resource="https://database.windows.net/"; grant_type="client_credentials"; client_id=$clientid; client_secret=$secret }`
+                      -ContentType "application/x-www-form-urlencoded"
+            $access_token = $request.access_token
+            
+            Invoke-Sqlcmd -ServerInstance $(SIT_Server_Name) -Database $(SIT_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"
+            
+            }
+            }
+
+
+      - task: PowerShell@2
+        displayName: Commit the files in DEV branch
+        inputs:
+          targetType: 'inline'
+          script: |
+            $File_Count = ( Get-ChildItem $(Build.ArtifactStagingDirectory) | Measure-Object ).Count
+            echo $File_Count
+            if($File_Count -ge 1)
+            {
+            cd $(System.DefaultWorkingDirectory)
+            git config --global user.email "ServiceHADdev@njresources.com"
+            git config --global user.name "Service Hanu-AzureDevops"
+            $Time = Get-Date
+            $Message = "$Time"
+            git add .
+            git commit -m "$Message"
+            git push https://$(SQL_PAT)@dev.azure.com/NewJerseyResources/SQL%20Database%20Deployment/_git/SQL%20Database%20Deployment HEAD:DEV --force
+            }
+      - task: CopyFiles@2
+        inputs:
+          SourceFolder: '$(System.DefaultWorkingDirectory)/Projects/${{ parameters.Project_Name }}'
+          Contents: '*.sql'
+          TargetFolder: '$(Build.ArtifactStagingDirectory)'
+          OverWrite: true
+
+      - task: PublishBuildArtifacts@1
+        displayName: "Pulish Scripts"
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'Drop'
+          publishLocation: 'Container'
+
+
+
+- stage: UATDeployment
+  jobs:
+  - deployment: publish
+    pool:
+     name: AzureBI-Agent
+     demands:
+     - Agent.Name -equals AZURE-DEVOPS-08
+    displayName: deploy Sscript to UAT
+    environment: UAT
+  - job: My_Job
+    pool:
+     name: AzureBI-Agent
+     demands:
+     - Agent.Name -equals AZURE-DEVOPS-08
+    steps:
+    - download: current
+      artifact: Drop
+    
+            
+    - task: PowerShell@2
+      inputs:
+        targetType: 'inline'
+        script: |
+          git clone -b DEV --single-branch -q "https://$(SQL_PAT)@dev.azure.com/NewJerseyResources/SQL%20Database%20Deployment/_git/SQL%20Database%20Deployment"
+          
+            
+    - task: PythonScript@0
+      displayName: Get the Scripts that needs to be deployed
+      inputs:
+        scriptSource: 'inline'
+        script: |
+          import csv
+          import sys
+          from pandas import *
+          import os
+          import shutil
+
+          
+
+          data1 = read_csv("C:\\Agent\\_work\\6\\s\\SQL%20Database%20Deployment\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv")
+          SIT_Script = data1[sys.argv[1]].tolist()
+          data2 = read_csv("C:\\Agent\\_work\\6\\s\\SQL%20Database%20Deployment\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_UAT_Script_Tracking.csv")
+          UAT_Script = data2[sys.argv[1]].tolist()
+          Final_Script = list(set(SIT_Script) - set(UAT_Script))  
+          print(Final_Script)
+          Final_Script.sort()
+
+          for scripts in Final_Script:
+            shutil.copy("C:\\Agent\\_work\\6\\Drop" + "\\" + scripts, "C:\\Agent\\_work\\6\\a\\"+scripts)
+            UAT_Script.append(scripts)
+            
+          
+          print(UAT_Script)
+          Details = [sys.argv[1]]
+          r = zip(UAT_Script)
+          with open("C:\\Agent\\_work\\6\\s\\SQL%20Database%20Deployment\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_UAT_Script_Tracking.csv", "w", newline='' ) as s:
+              w = csv.writer(s)
+              w.writerow(Details)
+              for row in r:
+                  w.writerow(row)
+          
+        arguments: '${{ parameters.Project_Name }}'
+
+
+    - task: PublishBuildArtifacts@1
+      displayName: "Pulish Scripts"
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'Drop'
+        publishLocation: 'Container'
+
+    - task: PowerShell@2
+      displayName: Deploy Script in UAT
+      inputs:
+        targetType: 'inline'
+        script: |
+          $File_Count = ( Get-ChildItem $(Build.ArtifactStagingDirectory) | Measure-Object ).Count
+          echo $File_Count
+          if($File_Count -ge 1)
+          {
+          cd "$(Build.ArtifactStagingDirectory)"
+          $contents = Get-ChildItem -Name
+          $type= $contents.GetType()
+          
+          if($type.Name -eq "String"){
+            $content = ,$contents
+          }
+          else{$content = $contents }
+          
+          $len=$content.length
+          
+          Import-Module SQLServer
+          for($i=0; $i -le $len-1; $i++){
+          $report_SQL_File_Name = $content[$i]
+          $Non_Final_Path = "$(Build.ArtifactStagingDirectory)"
+          $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"
+          
+            $clientid = "$(CLIENT_ID)"
+            $tenantid = "$(TENANT_ID)"
+            $secret = "$(CLIENT_SECRET)"
+          
+          $request = Invoke-RestMethod -Method POST `
+                    -Uri "https://login.microsoftonline.com/$tenantid/oauth2/token"`
+                    -Body @{ resource="https://database.windows.net/"; grant_type="client_credentials"; client_id=$clientid; client_secret=$secret }`
+                    -ContentType "application/x-www-form-urlencoded"
+          $access_token = $request.access_token
+          echo "$report_SQL_File_Name"
+          Invoke-Sqlcmd -ServerInstance $(UAT_Server_Name) -Database $(UAT_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"
+      
+          }
+          }
+
+
+    - task: PowerShell@2
+      displayName: Commit the files in main branch
+      inputs:
+        targetType: 'inline'
+        script: |
+          git --version
+          $File_Count = ( Get-ChildItem $(Build.ArtifactStagingDirectory) | Measure-Object ).Count
+          echo $File_Count
+          if($File_Count -ge 1)
+          {
+          cd $(System.DefaultWorkingDirectory)/SQL%20Database%20Deployment
+          git config --global user.email "ServiceHADdev@njresources.com"
+          git config --global user.name "Service Hanu-AzureDevops"
+          $Time = Get-Date
+          $Message = "$Time"
+          git add .
+          git commit -m "$Message"
+          git pull
+          git push https://$(SQL_PAT)@dev.azure.com/NewJerseyResources/SQL%20Database%20Deployment/_git/SQL%20Database%20Deployment
+          }
+
+        
