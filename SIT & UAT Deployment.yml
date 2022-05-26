@@ -19,6 +19,7 @@ parameters:
   - WAM
   - Self_Service
   - TRC
+  - Test
 
 variables:
 - group: SQL Credentials
@@ -60,7 +61,6 @@ stages:
             path = "C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1]
             print(path)
             dir_list = os.listdir(path)
-            
             data = read_csv("C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv")
             SIT_Script = data[sys.argv[1]].tolist()
             print(SIT_Script)
@@ -70,22 +70,10 @@ stages:
               a=0
               for values in SIT_Script:
                 if(scripts == values):
-                  a=1
-            
+                  a=1        
               if(a == 0):
                 if scripts.endswith('.sql'):
-                  shutil.copy("C:\\Agent\\_work\\6\\s\\Projects\\"+ sys.argv[1] + "\\" + scripts, "C:\\Agent\\_work\\6\\a\\"+scripts)
-                  SIT_Script.append(scripts)
-            
-            print(SIT_Script)
-            Details = [sys.argv[1]]
-            r = zip(SIT_Script)
-            with open("C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv", "w", newline='' ) as s:
-                w = csv.writer(s)
-                w.writerow(Details)
-                for row in r:
-                    w.writerow(row)
-            
+                  shutil.copy("C:\\Agent\\_work\\6\\s\\Projects\\"+ sys.argv[1] + "\\" + scripts, "C:\\Agent\\_work\\6\\a\\"+scripts)      
           arguments: '${{ parameters.Project_Name }}'
 
 
@@ -100,39 +88,79 @@ stages:
             if($File_Count -ge 1)
             {
             cd "$(Build.ArtifactStagingDirectory)"
-            Get-ChildItem -Name
-            $contents = Get-ChildItem -Name
+            $ToNatural = { [regex]::Replace($_, '\d+', { $args[0].Value.PadLeft(20,"0") }) } 
+            $script_name = dir *.sql|sort $ToNatural 
+            $contents = $script_name.Name
             $type= $contents.GetType()
-            
+            mkdir Deployed
             if($type.Name -eq "String"){
               $content = ,$contents
             }
-            else{$content = $contents }
-            
-            $len=$content.length
-            
+            else{$content = $contents }       
+            $len=$content.length       
             Import-Module SQLServer
             for($i=0; $i -le $len-1; $i++)
-            {
-            
+            {           
             $report_SQL_File_Name = $content[$i]
+            echo $report_SQL_File_Name
             $Non_Final_Path = "$(Build.ArtifactStagingDirectory)"
-            $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"
-            
+            $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"          
             $clientid = "$(CLIENT_ID)"
             $tenantid = "$(TENANT_ID)"
-            $secret = "$(CLIENT_SECRET)"
-            
+            $secret = "$(CLIENT_SECRET)"       
             $request = Invoke-RestMethod -Method POST `
                       -Uri "https://login.microsoftonline.com/$tenantid/oauth2/token"`
                       -Body @{ resource="https://database.windows.net/"; grant_type="client_credentials"; client_id=$clientid; client_secret=$secret }`
                       -ContentType "application/x-www-form-urlencoded"
             $access_token = $request.access_token
-            
             Invoke-Sqlcmd -ServerInstance $(SIT_Server_Name) -Database $(SIT_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"
+            Copy-Item -Path $Final_Path -Destination C:\Agent\_work\6\a\Deployed
+            }
+            }
+        continueOnError: True  
+
+
+      - task: PythonScript@0
+        displayName: Update SIT.csv File
+        inputs:
+          scriptSource: 'inline'
+          script: |
+            import csv
+            import sys
+            from pandas import *
+            import os
+            import shutil
+            import re     
+            path = "C:\\Agent\\_work\\6\\a\\Deployed"
+            dir_list = os.listdir(path)          
+            data = read_csv("C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv")
+            SIT_Script = data[sys.argv[1]].tolist()
+            print(SIT_Script)
+
+            for scripts in dir_list:
+              a=0
+              for values in SIT_Script:
+                if(scripts == values):
+                  a=1
             
-            }
-            }
+              if(a == 0):
+                if scripts.endswith('.sql'):
+                    SIT_Script.append(scripts)
+                    
+            def atoi(text):
+              return int(text) if text.isdigit() else text
+            def natural_keys(text):
+              return [ atoi(c) for c in re.split(r'(\d+)', text) ]
+            SIT_Script.sort(key=natural_keys)
+            print(SIT_Script)        
+            Details = [sys.argv[1]]
+            r = zip(SIT_Script)
+            with open("C:\\Agent\\_work\\6\\s\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv", "w", newline='' ) as s:
+                w = csv.writer(s)
+                w.writerow(Details)
+                for row in r:
+                    w.writerow(row)
+          arguments: '${{ parameters.Project_Name }}'
 
 
       - task: PowerShell@2
@@ -205,8 +233,7 @@ stages:
           from pandas import *
           import os
           import shutil
-
-          
+          import re
 
           data1 = read_csv("C:\\Agent\\_work\\6\\s\\SQL%20Database%20Deployment\\Projects\\" + sys.argv[1] + "\\" + sys.argv[1] + "_SIT_Script_Tracking.csv")
           SIT_Script = data1[sys.argv[1]].tolist()
@@ -214,13 +241,15 @@ stages:
           UAT_Script = data2[sys.argv[1]].tolist()
           Final_Script = list(set(SIT_Script) - set(UAT_Script))  
           print(Final_Script)
-          Final_Script.sort()
-
+          def atoi(text):
+            return int(text) if text.isdigit() else text
+          def natural_keys(text):
+            return [ atoi(c) for c in re.split(r'(\d+)', text) ]
+          Final_Script.sort(key=natural_keys)
+          print(Final_Script)
           for scripts in Final_Script:
             shutil.copy("C:\\Agent\\_work\\6\\Drop" + "\\" + scripts, "C:\\Agent\\_work\\6\\a\\"+scripts)
-            UAT_Script.append(scripts)
-            
-          
+            UAT_Script.append(scripts)         
           print(UAT_Script)
           Details = [sys.argv[1]]
           r = zip(UAT_Script)
@@ -228,17 +257,9 @@ stages:
               w = csv.writer(s)
               w.writerow(Details)
               for row in r:
-                  w.writerow(row)
-          
+                  w.writerow(row)          
         arguments: '${{ parameters.Project_Name }}'
 
-
-    - task: PublishBuildArtifacts@1
-      displayName: "Pulish Scripts"
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-        ArtifactName: 'Drop'
-        publishLocation: 'Container'
 
     - task: PowerShell@2
       displayName: Deploy Script in UAT
@@ -256,34 +277,29 @@ stages:
           if($type.Name -eq "String"){
             $content = ,$contents
           }
-          else{$content = $contents }
-          
-          $len=$content.length
-          
+          else{$content = $contents } 
+          $len=$content.length      
           Import-Module SQLServer
           for($i=0; $i -le $len-1; $i++){
           $report_SQL_File_Name = $content[$i]
           $Non_Final_Path = "$(Build.ArtifactStagingDirectory)"
-          $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"
-          
+          $Final_Path = "$Non_Final_Path/$report_SQL_File_Name"         
             $clientid = "$(CLIENT_ID)"
             $tenantid = "$(TENANT_ID)"
-            $secret = "$(CLIENT_SECRET)"
-          
+            $secret = "$(CLIENT_SECRET)"       
           $request = Invoke-RestMethod -Method POST `
                     -Uri "https://login.microsoftonline.com/$tenantid/oauth2/token"`
                     -Body @{ resource="https://database.windows.net/"; grant_type="client_credentials"; client_id=$clientid; client_secret=$secret }`
                     -ContentType "application/x-www-form-urlencoded"
           $access_token = $request.access_token
           echo "$report_SQL_File_Name"
-          Invoke-Sqlcmd -ServerInstance $(UAT_Server_Name) -Database $(UAT_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"
-      
+          Invoke-Sqlcmd -ServerInstance $(UAT_Server_Name) -Database $(UAT_Database_Name) -AccessToken $access_token -InputFile "$Final_Path"   
           }
           }
 
 
     - task: PowerShell@2
-      displayName: Commit the files in main branch
+      displayName: Commit the files in DEV branch
       inputs:
         targetType: 'inline'
         script: |
